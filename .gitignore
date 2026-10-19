@@ -49,4 +49,5 @@ app.*.map.json
 
 # Local ESP32 Wi-Fi credentials and build output
 firmware/**/secrets.h
+firmware/**/secret.h
 firmware/**/.pio/
