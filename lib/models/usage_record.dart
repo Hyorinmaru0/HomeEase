@@ -17,7 +17,6 @@ class UsageRecord {
   });
   Duration get runtime => offTime.difference(onTime);
   double get cost => energyKwh * rate;
-  // Spread a session across dates proportionally, including overnight sessions.
   double energyOn(DateTime date) {
     final start = DateTime(date.year, date.month, date.day);
     final end = start.add(const Duration(days: 1));

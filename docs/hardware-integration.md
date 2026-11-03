@@ -1,5 +1,9 @@
 # HomeEase ESP32 integration
 
+**Current seven-appliance wiring and upload instructions:** [31 October system update](system-update-2026-10-31.md). It supersedes the appliance list, fan flags, GPIO reservations and old compile sizes below. The current firmware is `homeease-2.2`, has four new LED outputs, always excludes GPIO32, and keeps the existing sensor pins and TV content. See [the 1 November wiring update](wiring-update-2026-11-01.md): Mini Fridge GPIO14, Living Room AC GPIO33, INA219 SDA16/SCL17 on Wire1, and LCD SDA21/SCL22 on Wire. INA219 measurements remain pending. Firmware 2.2 also corrects the user-confirmed active-low polarity of the Living Room AC and Smart Wall Lamp, including their startup OFF levels. Wi-Fi secrets were preserved; no flash was performed.
+
+## Historical integration record (superseded)
+
 The existing Flutter screens, navigation and modules are retained. Mini TV is the only new appliance. ID `mini-tv` uses the same switches, details, room filters, routines and history as the original three appliances. Old demo saves gain it once without resetting their data.
 
 ## Connect the existing app
@@ -27,14 +31,14 @@ After installing the libraries, the CLI build command is `arduino-cli compile --
 | HC-SR04 TRIG / ECHO | 5 / 18 | Living room proximity occupancy |
 | HC-SR501 PIR OUT | 27 | Bedroom motion/occupancy |
 | LCD SDA / SCL | 21 / 22 | I2C address `0x27` |
-| Planned magnetic door sensor | 33 | Reserved; not enabled |
+| Former planned magnetic door sensor | No pin reserved | Not enabled; GPIO33 now belongs to Living Room AC |
 
 Mini TV ON writes `HomeEase TV` on row 1 and `TV ON` on row 2, with display/backlight enabled. OFF clears the characters and disables display/backlight. The LCD remains electrically powered. A missing I2C acknowledgement reports Mini TV offline and rejects commands; acknowledgement cannot verify visible characters or voltage compatibility.
 
 ## Sensors and estimates
 
 - HC-SR04 is sampled about every 250 ms with a 25 ms echo timeout. Valid range is 2–400 cm. `OCCUPIED_DISTANCE_CM` defaults to 100 cm and must be calibrated to placement. This is proximity detection, not a people counter. Timeout/out-of-range reports **Sensor unavailable**, not vacant.
-- PIR has a configurable 60-second warm-up. Occupancy stays true while OUT is HIGH and for **7 seconds after the last observed HIGH**. The sensor's own hold-time setting adds to this delay. Raw motion and held occupancy are displayed separately. The signal alone cannot reliably diagnose an unplugged PIR or prove vacancy.
+- PIR has a configurable 60-second warm-up. After warm-up, Bedroom occupancy follows motion directly: OUT HIGH reports Occupied; OUT LOW reports Vacant, with no extra software hold. The app shows the change on its next refresh (normally every 5 seconds). The signal alone cannot reliably diagnose an unplugged PIR or prove vacancy.
 - Unavailable sensors do not trigger Smart Exit alerts. Network failure preserves a **Last known** snapshot and disables controls until reconnect succeeds.
 - No INA219 data is fabricated. Firmware declares `energySource: estimated`; watts use configurable ratings multiplied by commanded ON duration. Existing 12 W / 9 W / 45 W demo ratings are retained as placeholders, with 1 W for LCD. These are not measured LED/motor/LCD loads; set appropriate ratings before using estimates.
 - Match firmware `ELECTRICITY_RATE` to the app's tariff. The app's rate setting is local; completed board history keeps its recorded rate.
@@ -69,7 +73,7 @@ Demo and live snapshots remain separate. Demo switches never contact hardware. L
 | Fan exclusion | Unavailable live; GPIO32 untouched by startup, commands or routines | Software configured; physical exclusion check pending |
 | Mini TV repeated ON/OFF | Exact two lines / blank screen | Combined/electrical tests pending |
 | HC-SR04 near/far/no echo | Correct cm, occupancy threshold, unavailable on timeout | Calibration pending |
-| PIR motion then clear | Occupied; vacant ≥7 s after OUT returns LOW | Combined timing test pending |
+| PIR motion then clear | Occupied while OUT is HIGH; Vacant when OUT returns LOW, visible on the next app refresh | Combined timing test pending |
 | Wi-Fi loss/reconnect | Stale labels, disabled controls, real-state recovery | Physical LAN test pending |
 | Routine with app closed | One action at configured time after NTP sync | Board runtime test pending |
 | Restart | Outputs OFF; history/routines/priorities restored | Board NVS test pending |

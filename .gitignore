@@ -51,3 +51,7 @@ app.*.map.json
 firmware/**/secrets.h
 firmware/**/secret.h
 firmware/**/.pio/
+
+.env
+.env.*
+!.env.example

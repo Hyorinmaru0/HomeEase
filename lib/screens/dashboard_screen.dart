@@ -6,6 +6,7 @@ import '../widgets/common.dart';
 import '../widgets/device_card.dart';
 import '../widgets/energy_card.dart';
 import '../widgets/room_status_card.dart';
+import '../widgets/smart_controls.dart';
 
 class DashboardScreen extends StatelessWidget {
   final HomeController controller;
@@ -64,6 +65,7 @@ class DashboardScreen extends StatelessWidget {
         ),
         const SizedBox(height: 22),
         _HomeOverview(controller: c, onRooms: openRooms),
+        SmartControls(controller: c),
         SectionHeading(
           'Quick controls',
           action: 'All devices',
@@ -188,7 +190,7 @@ class _HomeOverview extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'CURRENT POWER',
+                      'ESTIMATED POWER',
                       style: TextStyle(
                         fontSize: 10,
                         letterSpacing: 1.1,

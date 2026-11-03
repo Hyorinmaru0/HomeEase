@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../controllers/home_controller.dart';
+import '../controllers/auth_controller.dart';
+import '../controllers/account_data_controller.dart';
+import 'account_screen.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import 'alerts_screen.dart';
@@ -14,12 +17,31 @@ import 'settings_screen.dart';
 
 class HomeShell extends StatefulWidget {
   final HomeController controller;
-  const HomeShell({super.key, required this.controller});
+  final AuthController? auth;
+  final AccountDataController? account;
+  const HomeShell({
+    super.key,
+    required this.controller,
+    this.auth,
+    this.account,
+  });
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    widget.controller.setForeground(state == AppLifecycleState.resumed);
+    if (state == AppLifecycleState.resumed) widget.controller.refresh();
+  }
+
   int _index = 0;
   final _scroll = ScrollController();
   static const _labels = ['Home', 'Devices', 'Energy', 'Routines', 'Settings'];
@@ -77,6 +99,7 @@ class _HomeShellState extends State<HomeShell> {
   );
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _scroll.dispose();
     super.dispose();
   }
@@ -100,7 +123,28 @@ class _HomeShellState extends State<HomeShell> {
         openSettings: () => _navigate(4),
       ),
       3 => SchedulesScreen(controller: c),
-      _ => SettingsScreen(controller: c),
+      _ => SettingsScreen(
+        controller: c,
+        account: widget.auth == null
+            ? null
+            : () {
+                if (widget.account == null) {
+                  widget.auth!.exitDemo();
+                  return;
+                }
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => AccountScreen(
+                      auth: widget.auth!,
+                      account: widget.account!,
+                    ),
+                  ),
+                );
+              },
+        accountLabel: widget.account == null
+            ? 'Exit demo / Login'
+            : 'Profile & logout',
+      ),
     };
     return Scaffold(
       appBar: AppBar(
@@ -124,7 +168,7 @@ class _HomeShellState extends State<HomeShell> {
             const SizedBox(width: 10),
             const Flexible(
               child: Text(
-                'homeease',
+                'HomeEase',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -202,6 +246,25 @@ class _HomeShellState extends State<HomeShell> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          if (widget.account?.error != null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Text(
+                                widget.account!.error!,
+                                style: const TextStyle(color: AppColors.amber),
+                              ),
+                            ),
+                          if (widget.auth?.guest == true)
+                            const Padding(
+                              padding: EdgeInsets.only(bottom: 12),
+                              child: Text(
+                                'LOCAL DEMO ? Simulated devices only',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: AppColors.amber,
+                                ),
+                              ),
+                            ),
                           if (c.error != null || c.storageError != null)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 20),

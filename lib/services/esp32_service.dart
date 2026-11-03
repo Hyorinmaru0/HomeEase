@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -16,7 +17,13 @@ abstract class Esp32Gateway {
 
 class Esp32Service implements Esp32Gateway {
   final http.Client _client;
-  Esp32Service({http.Client? client}) : _client = client ?? http.Client();
+  final Duration requestTimeout, readRetryDelay;
+  bool _closed = false;
+  Esp32Service({
+    http.Client? client,
+    this.requestTimeout = const Duration(seconds: 6),
+    this.readRetryDelay = const Duration(milliseconds: 250),
+  }) : _client = client ?? http.Client();
   static bool validAddress(String address) {
     final uri = Uri.tryParse(address.trim());
     return uri != null &&
@@ -27,15 +34,13 @@ class Esp32Service implements Esp32Gateway {
         uri.fragment.isEmpty;
   }
 
-  Future<Map<String, dynamic>> _request(
+  Future<http.Response> _request(
     String base,
     String path, {
     Map<String, dynamic>? body,
   }) async {
     if (!validAddress(base)) {
-      throw const FormatException(
-        'Enter a valid http:// or https:// ESP32 address.',
-      );
+      throw const Esp32AddressException();
     }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       final granted = await const MethodChannel('homeease/network')
@@ -53,18 +58,42 @@ class Esp32Service implements Esp32Gateway {
                     headers: {'Content-Type': 'application/json'},
                     body: jsonEncode(body),
                   ))
-            .timeout(const Duration(seconds: 6));
+            .timeout(requestTimeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('ESP32 returned HTTP ${response.statusCode}.');
+      throw Esp32HttpException(
+        response.statusCode,
+        body == null ? 'GET' : 'PUT',
+      );
     }
-    return response.body.isEmpty
-        ? <String, dynamic>{}
-        : jsonDecode(response.body) as Map<String, dynamic>;
+    return response;
   }
 
   @override
-  Future<Map<String, dynamic>> fetchState(String baseUrl) =>
-      _request(baseUrl, 'state');
+  Future<Map<String, dynamic>> fetchState(String baseUrl) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        final response = await _request(baseUrl, 'state');
+        try {
+          final decoded = jsonDecode(response.body);
+          if (decoded is! Map<String, dynamic>) {
+            throw const Esp32StateException();
+          }
+          return decoded;
+        } on FormatException {
+          throw const Esp32StateException();
+        }
+      } catch (error) {
+        if (_closed ||
+            attempt > 0 ||
+            (error is! http.ClientException && error is! TimeoutException)) {
+          rethrow;
+        }
+        await Future<void>.delayed(readRetryDelay);
+        if (_closed) rethrow;
+      }
+    }
+  }
+
   @override
   Future<void> setPower(String baseUrl, String id, bool on) async {
     await _request(
@@ -96,9 +125,61 @@ class Esp32Service implements Esp32Gateway {
   }
 
   @override
-  void close() => _client.close();
+  void close() {
+    _closed = true;
+    _client.close();
+  }
 }
 
 class LocalNetworkPermissionException implements Exception {
   const LocalNetworkPermissionException();
+}
+
+class Esp32AddressException implements Exception {
+  const Esp32AddressException();
+}
+
+class Esp32HttpException implements Exception {
+  final int statusCode;
+  final String method;
+  const Esp32HttpException(this.statusCode, this.method);
+}
+
+class Esp32StateException implements Exception {
+  const Esp32StateException();
+}
+
+String esp32FailureMessage(Object error) {
+  if (error is LocalNetworkPermissionException) {
+    return 'Allow local-network access in Android app settings, then reconnect.';
+  }
+  if (error is Esp32AddressException) {
+    return 'Enter the ESP32 base address in Settings, including http://.';
+  }
+  if (error is Esp32HttpException) {
+    if (error.method == 'PUT') {
+      if (error.statusCode == 503) {
+        return 'ESP32 reported a command failure (HTTP 503). Check device availability and the board storage status in Settings.';
+      }
+      return 'ESP32 rejected the command (HTTP ${error.statusCode}). Check that the board is running compatible HomeEase firmware.';
+    }
+    return 'ESP32 state request failed (HTTP ${error.statusCode}). Check the board firmware, then reconnect.';
+  }
+  if (error is Esp32StateException ||
+      error is FormatException ||
+      error is TypeError ||
+      error is ArgumentError ||
+      error is NoSuchMethodError) {
+    return 'ESP32 returned invalid device data. Check that the board is running compatible HomeEase firmware.';
+  }
+  if (error is TimeoutException) {
+    return 'ESP32 timed out. Check its address and Wi-Fi, then reconnect.';
+  }
+  if (error is http.ClientException) {
+    return 'Could not reach ESP32. Check its address and Wi-Fi, then reconnect.';
+  }
+  if (error is PlatformException || error is MissingPluginException) {
+    return 'Android local-network access could not be checked. Restart HomeEase and reconnect.';
+  }
+  return 'Could not confirm ESP32 state. Check the address and Wi-Fi, then reconnect.';
 }

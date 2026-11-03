@@ -108,13 +108,13 @@ class RoomsScreen extends StatelessWidget {
       ),
       if (controller.rooms.isEmpty)
         const EmptyState(
-          icon: Icons.sensor_door_outlined,
+          icon: Icons.sensors,
           title: 'No room readings',
           message: 'Connect your ESP32 to see room occupancy.',
         ),
       const SizedBox(height: 8),
       const Text(
-        'Smart Exit creates an alert when a room is vacant while an appliance is still on.',
+        'Occupancy is a sensor indication, not proof that someone has left. Run Smart Safety Check manually from Home.',
         style: TextStyle(color: AppColors.muted, fontSize: 12),
       ),
     ],

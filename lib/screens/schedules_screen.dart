@@ -75,7 +75,7 @@ class SchedulesScreen extends StatelessWidget {
         const EmptyState(
           icon: Icons.event_repeat_rounded,
           title: 'Your first routine awaits',
-          message: 'Schedule a light for the morning or switch off a fan at bedtime.',
+          message: 'Schedule a light for the morning or switch off a light at bedtime.',
         ),
       ...controller.schedules.map(
         (s) => Padding(

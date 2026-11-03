@@ -25,7 +25,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
         PageHeading(
           eyebrow: 'Activity',
           title: 'Usage history',
-          subtitle: 'Every completed session, in one place. ${c.energyLabel}.',
+          subtitle:
+              'Recorded usage intervals. ${c.energyLabel}. Unobserved time is excluded in live mode.',
         ),
         DropdownButtonFormField<String>(
           initialValue: _device ?? 'all',
@@ -43,8 +44,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           const EmptyState(
             icon: Icons.history_rounded,
             title: 'A fresh start',
-            message:
-                'Switch an appliance on, then off to record its first session.',
+            message: 'Keep the app open and connected while an appliance is on to record usage. Demo sessions are recorded when switched off.',
           ),
         ...records
             .take(100)
@@ -66,7 +66,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             ),
                           ),
                           Text(
-                            money(r.cost),
+                            '${money(r.cost)} est.',
                             style: const TextStyle(color: AppColors.mint),
                           ),
                         ],
@@ -90,7 +90,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             dot: false,
                           ),
                           StatusPill(
-                            '${r.energyKwh.toStringAsFixed(4)} kWh',
+                            '${r.energyKwh.toStringAsFixed(4)} kWh est.',
                             color: AppColors.green,
                             dot: false,
                           ),
@@ -110,7 +110,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           const Padding(
             padding: EdgeInsets.all(12),
             child: Text(
-              'Showing the most recent 100 sessions for this filter.',
+              'Showing the most recent 100 usage records for this filter.',
               style: TextStyle(color: AppColors.muted, fontSize: 12),
             ),
           ),

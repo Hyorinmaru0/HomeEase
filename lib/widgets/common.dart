@@ -10,8 +10,10 @@ String clockLabel(DateTime d) =>
 String dateLabel(DateTime d) =>
     '${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.month - 1]} ${d.day}';
 IconData applianceIcon(String kind) => switch (kind) {
-  'fan' => Icons.air_rounded,
   'tv' => Icons.tv_rounded,
+  'fridge' => Icons.kitchen_outlined,
+  'ac' => Icons.ac_unit_rounded,
+  'wall-lamp' => Icons.light_outlined,
   _ => Icons.lightbulb_outline_rounded,
 };
 

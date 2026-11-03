@@ -32,7 +32,7 @@ void main() {
   for (final width in [320.0, 390.0, 1000.0]) {
     testWidgets('all primary screens render at width $width', (tester) async {
       await load(tester, Size(width, 844));
-      expect(find.text('homeease'), findsOneWidget);
+      expect(find.text('HomeEase'), findsOneWidget);
       expect(tester.takeException(), isNull);
       for (final label in [
         'Devices',
@@ -48,58 +48,16 @@ void main() {
     });
   }
 
-  testWidgets(
-    'live fan switches are disabled on dashboard, devices and details',
-    (tester) async {
-      final c = await load(tester, const Size(390, 844));
-      final gateway = c.gateway as FakeGateway;
-      gateway.state = {
-        'devices': c.appliances
-            .map(
-              (d) => {
-                ...d.toJson(),
-                if (d.id == 'fan') ...{
-                  'online': false,
-                  'isOn': false,
-                  'watts': 0,
-                  'onSince': null,
-                },
-              },
-            )
-            .toList(),
-        'rooms': c.rooms.map((r) => r.toJson()).toList(),
-        'history': [],
-        'schedules': [],
-      };
-      await c.updateSettings(AppSettings(demoMode: false));
-      await tester.pumpAndSettle();
-      final fanCard = find.byWidgetPredicate(
-        (w) => w is DeviceCard && w.device.id == 'fan',
-      );
-      final toggle = find.descendant(
-        of: fanCard,
-        matching: find.byType(Switch),
-      );
-      expect(tester.widget<Switch>(toggle).onChanged, isNull);
-      expect(
-        find.descendant(of: fanCard, matching: find.text('Unavailable')),
-        findsOneWidget,
-      );
-      await tester.tap(find.text('Devices').last);
-      await tester.pumpAndSettle();
-      expect(tester.widget<Switch>(toggle).onChanged, isNull);
-      await tester.ensureVisible(find.byTooltip('Fan details'));
-      await tester.tap(find.byTooltip('Fan details'));
-      await tester.pumpAndSettle();
-      expect(find.text('Not connected'), findsOneWidget);
-      expect(
-        tester.widget<SwitchListTile>(find.byType(SwitchListTile)).onChanged,
-        isNull,
-      );
-      expect(gateway.powerCalls, 0);
-      expect(tester.takeException(), isNull);
-    },
-  );
+  testWidgets('all seven supported appliances appear', (tester) async {
+    final c = await load(tester, const Size(390, 844));
+    expect(c.appliances.length, 7);
+    expect(find.text('Fan'), findsNothing);
+    expect(find.text('Smart Safety Check'), findsOneWidget);
+    expect(find.text('Smart Safety Check').hitTestable(), findsOneWidget);
+    await tester.tap(find.text('Devices').last);
+    await tester.pumpAndSettle();
+    expect(find.byType(DeviceCard), findsNWidgets(7));
+  });
 
   testWidgets('primary screens support larger system text', (tester) async {
     tester.platformDispatcher.textScaleFactorTestValue = 1.3;
@@ -119,10 +77,18 @@ void main() {
     final c = await load(tester, const Size(390, 844));
     await tester.tap(find.text('Devices').last);
     await tester.pumpAndSettle();
-    final card = find.byType(DeviceCard).at(1);
-    await tester.tap(find.descendant(of: card, matching: find.byType(Switch)));
+    final card = find.byWidgetPredicate(
+      (w) => w is DeviceCard && w.device.id == 'bedroom-light',
+    );
+    final powerSwitch = find.descendant(
+      of: card,
+      matching: find.byType(Switch),
+    );
+    await tester.ensureVisible(powerSwitch);
+    await tester.tap(powerSwitch);
     await tester.pumpAndSettle();
     expect(c.device('bedroom-light')!.isOn, isTrue);
+    await tester.ensureVisible(find.byTooltip('Bedroom Light details'));
     await tester.tap(find.byTooltip('Bedroom Light details'));
     await tester.pumpAndSettle();
     expect(find.text('Load priority'), findsOneWidget);
@@ -256,7 +222,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull, reason: label);
       }
-      expect(find.textContaining('Pending hardware:'), findsOneWidget);
+      expect(find.textContaining('Pending hardware:'), findsNothing);
     },
   );
 }

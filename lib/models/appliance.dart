@@ -2,10 +2,10 @@ enum LoadPriority { high, medium, low }
 
 class Appliance {
   final String id;
-  final String name;
+  String name;
   final String roomId;
   final String kind;
-  final double ratedWatts;
+  double ratedWatts;
   final String? hardwareNote;
   bool isOn;
   bool online;

@@ -66,7 +66,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                     children: [
                       IconTile(
                         switch (a.kind) {
-                          AlertKind.smartExit => Icons.door_front_door_outlined,
+                          AlertKind.smartExit => Icons.lightbulb_outline,
                           AlertKind.highLoad => Icons.bolt_rounded,
                           AlertKind.abnormalUsage => Icons.schedule_rounded,
                           AlertKind.connection => Icons.wifi_off_rounded,
@@ -80,7 +80,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
                       Expanded(
                         child: Text(
                           switch (a.kind) {
-                            AlertKind.smartExit => 'Smart Exit',
+                            AlertKind.smartExit => 'Energy reminder',
                             AlertKind.highLoad => 'High load',
                             AlertKind.abnormalUsage => 'Unusual runtime',
                             AlertKind.connection => 'Connection',

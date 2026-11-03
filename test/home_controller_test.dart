@@ -21,47 +21,38 @@ void main() {
   });
   tearDown(() => c.dispose());
 
-  test(
-    'presentation fan is unavailable live but retains demo control',
-    () async {
-      final demoFanOn = c.device('fan')!.isOn;
-      gateway.state = {
-        'devices': c.appliances
-            .map(
-              (d) => {
-                ...d.toJson(),
-                if (d.id == 'fan') ...{
-                  'online': false,
-                  'isOn': false,
-                  'watts': 0,
-                  'onSince': null,
-                  'hardwareNote':
-                      'Not connected; relay and fan disabled for presentation',
-                },
-              },
-            )
-            .toList(),
-        'rooms': c.rooms.map((r) => r.toJson()).toList(),
-        'history': [],
-        'schedules': [],
-      };
-      await c.updateSettings(AppSettings(demoMode: false));
-      expect(c.appliances.length, 4);
-      expect(c.device('fan')!.online, isFalse);
-      expect(await c.setPower('fan', true), isFalse);
-      expect(await c.setPower('fan', false), isFalse);
-      expect(gateway.powerCalls, 0);
-      for (final id in ['living-light', 'bedroom-light', 'mini-tv']) {
-        expect(await c.setPower(id, true), isTrue);
-      }
-      expect(gateway.powerCalls, 3);
-      await c.updateSettings(AppSettings());
-      expect(c.device('fan')!.online, isTrue);
-      expect(c.device('fan')!.isOn, demoFanOn);
-      expect(await c.setPower('fan', !demoFanOn), isTrue);
-      expect(gateway.powerCalls, 3);
-    },
-  );
+  test('legacy fan is ignored in demo and live state', () async {
+    gateway.state = {
+      'devices': [
+        ...c.appliances.map((d) => d.toJson()),
+        {'id': 'fan'},
+      ],
+      'rooms': c.rooms.map((r) => r.toJson()).toList(),
+      'history': [
+        {'applianceId': 'fan'},
+      ],
+      'schedules': [
+        {
+          'id': 'legacy',
+          'applianceId': 'fan',
+          'name': 'old',
+          'minuteOfDay': 1,
+          'turnOn': false,
+          'days': [1],
+          'enabled': true,
+        },
+      ],
+    };
+    await c.updateSettings(AppSettings(demoMode: false));
+    expect(c.connected, isTrue);
+    expect(c.appliances.length, 7);
+    expect(c.device('fan'), isNull);
+    expect(await c.setPower('fan', true), isFalse);
+    expect(c.history, isEmpty);
+    expect(c.schedules, isEmpty);
+    await c.updateSettings(AppSettings());
+    expect(c.device('fan'), isNull);
+  });
 
   test(
     'Mini TV is added once to old demo saves without resetting data',
@@ -72,7 +63,7 @@ void main() {
       await storage.write('demo', saved);
       final restored = HomeController(storage: storage, gateway: FakeGateway());
       await restored.initialize(startTimer: false);
-      expect(restored.appliances.length, 4);
+      expect(restored.appliances.length, 7);
       expect(restored.device('bedroom-light')!.isOn, isTrue);
       expect(restored.history.length, c.history.length);
       expect(restored.schedules.length, c.schedules.length);
@@ -142,7 +133,7 @@ void main() {
         c.rooms.last.occupied,
         isTrue,
       ); // Firmware's 7-second hold is authoritative.
-      expect(c.energyLabel, 'Estimated energy (rated power)');
+      expect(c.energyLabel, 'Estimated energy (configured wattage)');
       await c.setOccupancy('living', false);
       expect(c.rooms.first.occupied, isTrue);
       final cached = (await storage.read('live'))!;
@@ -195,7 +186,7 @@ void main() {
       await c.refresh();
       expect(await c.setPower('mini-tv', false), isTrue);
       expect(c.device('mini-tv')!.isOn, isFalse);
-      gateway.state['devices'][3]['online'] = false;
+      gateway.state['devices'][2]['online'] = false;
       await c.refresh();
       final calls = gateway.powerCalls;
       expect(await c.setPower('mini-tv', true), isFalse);
@@ -214,21 +205,24 @@ void main() {
     expect(record.cost, closeTo(.207, .000001));
     expect(gateway.powerCalls, 0);
   });
-  test('occupancy alerts are deduplicated until condition clears', () async {
-    await c.setOccupancy('living', false);
-    final count = c.alerts.length;
-    await c.tick();
-    await c.tick();
-    expect(c.alerts.length, count);
-    await c.setOccupancy('living', true);
-    await c.setOccupancy('living', false);
-    expect(c.alerts.length, count + 1);
-  });
+  test(
+    'occupancy changes never claim departure or trigger safety alarms',
+    () async {
+      await c.setOccupancy('living', false);
+      final count = c.alerts.length;
+      await c.tick();
+      await c.tick();
+      expect(c.alerts.length, count);
+      await c.setOccupancy('living', true);
+      await c.setOccupancy('living', false);
+      expect(c.alerts.length, count);
+    },
+  );
   test(
     'high-load and long-runtime thresholds produce distinct alerts',
     () async {
       await c.updateSettings(
-        AppSettings(highLoadWatts: 20, longRuntimeHours: .25),
+        AppSettings(highLoadWatts: 10, longRuntimeHours: .25),
       );
       expect(c.alerts.any((a) => a.kind == AlertKind.highLoad), isTrue);
       expect(c.alerts.any((a) => a.kind == AlertKind.abnormalUsage), isTrue);
@@ -302,7 +296,7 @@ void main() {
       ];
       await c.refresh();
       expect(c.rooms.length, 2);
-      expect(c.appliances.length, 4);
+      expect(c.appliances.length, 7);
       expect(c.connected, isFalse);
     },
   );

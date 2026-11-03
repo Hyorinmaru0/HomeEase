@@ -2,6 +2,7 @@ import '../models/appliance.dart';
 import '../models/room.dart';
 import '../models/schedule.dart';
 import '../models/usage_record.dart';
+import 'supported_devices.dart';
 
 abstract final class DemoData {
   static Appliance miniTv() => Appliance(
@@ -37,19 +38,18 @@ abstract final class DemoData {
       ratedWatts: 9,
       priority: LoadPriority.medium,
     ),
-    Appliance(
-      id: 'fan',
-      name: 'Fan',
-      roomId: 'bedroom',
-      kind: 'fan',
-      ratedWatts: 45,
-      isOn: true,
-      watts: 45,
-      priority: LoadPriority.low,
-      onSince: now.subtract(const Duration(minutes: 85)),
-      totalKwh: .06375,
-    ),
     miniTv(),
+    ...['mini-fridge', 'living-ac', 'bedroom-wall-lamp', 'bedroom-ac'].map(
+      (id) => Appliance(
+        id: id,
+        name: SupportedDevices.names[id]!,
+        roomId: SupportedDevices.rooms[id]!,
+        kind: SupportedDevices.kinds[id]!,
+        ratedWatts: SupportedDevices.defaultWatts[id]!,
+        hardwareNote: SupportedDevices.modelNote(id),
+        priority: id == 'mini-fridge' ? LoadPriority.high : LoadPriority.medium,
+      ),
+    ),
   ];
   static List<DeviceSchedule> schedules() => [
     const DeviceSchedule(
@@ -62,7 +62,7 @@ abstract final class DemoData {
     ),
     const DeviceSchedule(
       id: 'bedtime',
-      applianceId: 'fan',
+      applianceId: 'bedroom-light',
       name: 'Time to wind down',
       minuteOfDay: 23 * 60,
       turnOn: false,
@@ -78,11 +78,11 @@ abstract final class DemoData {
         now.day,
       ).subtract(Duration(days: day));
       for (final device in appliances(now)) {
+        if (!['living-light', 'bedroom-light', 'mini-tv'].contains(device.id)) {
+          continue;
+        }
         final start = date.add(const Duration(hours: 1));
-        final end = date.add(
-          Duration(hours: device.kind == 'fan' ? 7 + day % 3 : 4 + day % 2),
-        );
-        // Every seeded session ends in the past, even just after midnight.
+        final end = date.add(Duration(hours: 4 + day % 2));
         if (end.isAfter(now.subtract(const Duration(hours: 2)))) continue;
         records.add(
           UsageRecord(

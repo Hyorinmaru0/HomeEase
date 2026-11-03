@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../controllers/home_controller.dart';
 import '../models/appliance.dart';
+import '../services/supported_devices.dart';
 import '../theme/app_theme.dart';
 import 'common.dart';
 
@@ -18,8 +19,13 @@ class DeviceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = device.kind == 'fan' ? AppColors.lavender : AppColors.amber;
-    final status = !device.online
+    final color = AppColors.amber;
+    final pending = controller.pendingDeviceId == device.id;
+    final status = pending
+        ? 'Sending command…'
+        : !controller.settings.demoMode && !controller.connected
+        ? 'Last known · ${device.isOn ? 'On' : 'Off'}'
+        : !device.online
         ? 'Unavailable'
         : device.isOn
         ? '${device.watts.toStringAsFixed(0)} W · On'
@@ -29,22 +35,30 @@ class DeviceCard extends StatelessWidget {
       child: SizedBox(
         width: 52,
         height: 48,
-        child: FittedBox(
-          child: Switch(
-            value: device.isOn,
-            onChanged: controller.canControl && device.online
-                ? (on) async {
-                    if (!await controller.setPower(device.id, on) &&
-                        context.mounted) {
-                      showMessage(
-                        context,
-                        controller.error ?? 'Device is unavailable.',
-                      );
-                    }
-                  }
-                : null,
-          ),
-        ),
+        child: pending
+            ? const Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            : FittedBox(
+                child: Switch(
+                  value: device.isOn,
+                  onChanged: controller.canControl && device.online
+                      ? (on) async {
+                          if (!await controller.setPower(device.id, on) &&
+                              context.mounted) {
+                            showMessage(
+                              context,
+                              controller.error ?? 'Device is unavailable.',
+                            );
+                          }
+                        }
+                      : null,
+                ),
+              ),
       ),
     );
     final details = IconButton(
@@ -75,7 +89,14 @@ class DeviceCard extends StatelessWidget {
           controller.roomName(device.roomId),
           style: const TextStyle(fontSize: 11, color: AppColors.muted),
         ),
-        if (!controller.settings.demoMode && device.hardwareNote != null)
+        if (SupportedDevices.modelNote(device.id) != null)
+          Text(
+            SupportedDevices.modelNote(device.id)!,
+            style: const TextStyle(fontSize: 11, color: AppColors.muted),
+          ),
+        if (!controller.settings.demoMode &&
+            !device.online &&
+            device.hardwareNote != null)
           Text(
             device.hardwareNote!,
             style: const TextStyle(fontSize: 11, color: AppColors.amber),
@@ -198,7 +219,7 @@ void showDeviceDetails(
               children: [
                 IconTile(
                   applianceIcon(d.kind),
-                  color: d.kind == 'fan' ? AppColors.lavender : AppColors.amber,
+                  color: AppColors.amber,
                   size: 64,
                 ),
                 const SizedBox(height: 20),
@@ -208,6 +229,14 @@ void showDeviceDetails(
                   style: const TextStyle(color: AppColors.muted),
                 ),
                 const SizedBox(height: 24),
+                if (SupportedDevices.modelNote(id) != null)
+                  Text(
+                    SupportedDevices.modelNote(id)!,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.muted,
+                    ),
+                  ),
                 if (!controller.settings.demoMode && d.hardwareNote != null)
                   Text(
                     d.hardwareNote!,
@@ -220,11 +249,15 @@ void showDeviceDetails(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Power'),
                   subtitle: Text(
-                    !d.online
+                    controller.pendingDeviceId == id
+                        ? 'Sending command…'
+                        : !d.online
                         ? 'Not connected'
                         : d.kind == 'tv'
                         ? (d.isOn ? 'HomeEase TV • TV ON' : 'Display blank')
-                        : (d.isOn ? 'Device is running' : 'Device is off'),
+                        : (d.isOn
+                              ? 'Power indicator ON'
+                              : 'Power indicator OFF'),
                   ),
                   value: d.isOn,
                   onChanged: controller.canControl && d.online
@@ -241,12 +274,19 @@ void showDeviceDetails(
                 ),
                 const Divider(),
                 Text(
+                  controller.energyExplanation,
+                  style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                ),
+                Text(
                   '${controller.connectionLabel} • ${controller.energyLabel}',
                   style: const TextStyle(fontSize: 12, color: AppColors.muted),
                 ),
-                _DetailLine('Current power', '${d.watts.toStringAsFixed(0)} W'),
                 _DetailLine(
-                  'Rated power',
+                  'Estimated power',
+                  '${d.watts.toStringAsFixed(0)} W',
+                ),
+                _DetailLine(
+                  'Configured wattage',
                   '${d.ratedWatts.toStringAsFixed(0)} W',
                 ),
                 _DetailLine(
@@ -256,8 +296,10 @@ void showDeviceDetails(
                       : durationLabel(controller.now().difference(d.onSince!)),
                 ),
                 _DetailLine(
-                  'Energy this session',
-                  '${(d.isOn ? d.totalKwh - d.sessionStartKwh : 0).toStringAsFixed(4)} kWh',
+                  controller.settings.demoMode
+                      ? 'Estimated session energy'
+                      : 'Estimated recorded energy',
+                  '${(controller.settings.demoMode ? (d.isOn ? d.totalKwh - d.sessionStartKwh : 0) : d.totalKwh).toStringAsFixed(4)} kWh',
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<LoadPriority>(

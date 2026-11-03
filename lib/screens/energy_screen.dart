@@ -4,6 +4,7 @@ import '../controllers/home_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/energy_card.dart';
+import '../widgets/budget_card.dart';
 
 class EnergyScreen extends StatefulWidget {
   final HomeController controller;
@@ -33,6 +34,12 @@ class _EnergyScreenState extends State<EnergyScreen> {
           title: 'Energy',
           subtitle: '${c.energyLabel}. Your consumption and estimated cost.',
         ),
+        BudgetCard(controller: c, configure: widget.openSettings),
+        Text(
+          c.energyExplanation,
+          style: const TextStyle(fontSize: 12, color: AppColors.muted),
+        ),
+        const SizedBox(height: 16),
         SegmentedButton<int>(
           showSelectedIcon: false,
           segments: const [
@@ -76,7 +83,7 @@ class _EnergyScreenState extends State<EnergyScreen> {
                 children: [
                   Expanded(
                     child: _EnergyMetric(
-                      label: 'Energy used',
+                      label: 'Estimated energy',
                       value: total.toStringAsFixed(3),
                       unit: 'kWh',
                     ),
@@ -192,9 +199,7 @@ class _EnergyScreenState extends State<EnergyScreen> {
                               ? 0
                               : (d.isOn ? d.watts / c.currentWatts : 0),
                           backgroundColor: AppColors.border,
-                          color: d.kind == 'fan'
-                              ? AppColors.lavender
-                              : AppColors.mint,
+                          color: AppColors.mint,
                         ),
                       ),
                     ],

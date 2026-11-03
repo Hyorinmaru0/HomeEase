@@ -1,19 +1,39 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../controllers/home_controller.dart';
 import '../models/app_settings.dart';
 import '../services/esp32_service.dart';
+import '../services/alarm_service.dart';
+import '../services/supported_devices.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 
 class SettingsScreen extends StatefulWidget {
   final HomeController controller;
-  const SettingsScreen({super.key, required this.controller});
+  final VoidCallback? account;
+  final String accountLabel;
+  const SettingsScreen({
+    super.key,
+    required this.controller,
+    this.account,
+    this.accountLabel = 'Account',
+  });
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen>
+    with WidgetsBindingObserver {
+  final _alarm = AlarmService();
+  Timer? _alarmTimer;
+  bool _testingAlarm = false;
+  late bool _voice, _sound, _vibration;
+  late String _period;
+  late Map<String, double> _budgetLimits;
+  late final TextEditingController _budget;
+  final Map<String, TextEditingController> _wattages = {};
   final _form = GlobalKey<FormState>();
   late final TextEditingController _rate, _load, _runtime, _url;
   late bool _demo, _alerts;
@@ -22,6 +42,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     final s = widget.controller.settings;
+    WidgetsBinding.instance.addObserver(this);
+    _voice = s.voiceEnabled;
+    _sound = s.alarmEnabled;
+    _vibration = s.vibrationEnabled;
+    _period = s.budgetPeriod;
+    _budgetLimits = {...s.budgetLimits, s.budgetPeriod: s.budget};
+    _budget = TextEditingController(text: s.budget.toString());
+    for (final id in SupportedDevices.names.keys) {
+      _wattages[id] = TextEditingController(
+        text: (s.applianceWatts[id] ?? 1).toString(),
+      );
+    }
     _rate = TextEditingController(text: s.electricityRate.toString());
     _load = TextEditingController(text: s.highLoadWatts.toString());
     _runtime = TextEditingController(text: s.longRuntimeHours.toString());
@@ -32,10 +64,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _alarmTimer?.cancel();
+    _alarm.dispose();
+    _budget.dispose();
+    for (final c in _wattages.values) {
+      c.dispose();
+    }
     for (final c in [_rate, _load, _runtime, _url]) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) _stopTest();
+  }
+
+  Future<void> _stopTest() async {
+    _alarmTimer?.cancel();
+    try {
+      await _alarm.stop();
+    } catch (_) {}
+    if (mounted) setState(() => _testingAlarm = false);
+  }
+
+  Future<void> _testAlarm() async {
+    if (_testingAlarm) {
+      await _stopTest();
+      return;
+    }
+    setState(() => _testingAlarm = true);
+    try {
+      await _alarm.start(vibrate: _vibration);
+      if (!mounted || !_testingAlarm) {
+        await _alarm.stop();
+        return;
+      }
+      _alarmTimer = Timer(const Duration(seconds: 3), _stopTest);
+    } catch (_) {
+      await _stopTest();
+      if (mounted) {
+        showMessage(
+          context,
+          'Alarm audio unavailable. Check phone audio settings.',
+        );
+      }
+    }
   }
 
   String? _number(String? input, {bool allowZero = false}) {
@@ -60,6 +136,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           alertsEnabled: _alerts,
           demoMode: _demo,
           esp32Url: _url.text.trim(),
+          voiceEnabled: _voice,
+          alarmEnabled: _sound,
+          vibrationEnabled: _vibration,
+          budget: double.parse(_budget.text),
+          budgetPeriod: _period,
+          budgetLimits: _budgetLimits,
+          applianceWatts: _wattages.map(
+            (id, field) => MapEntry(id, double.parse(field.text)),
+          ),
         ),
       );
       if (mounted) {
@@ -93,6 +178,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: 'Connection, energy rates, and alerts.',
           ),
           const SectionHeading('ESP32 connection'),
+          if (widget.account != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: OutlinedButton.icon(
+                onPressed: widget.account,
+                icon: const Icon(Icons.account_circle_outlined),
+                label: Text(widget.accountLabel),
+              ),
+            ),
           Surface(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -108,7 +202,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(fontSize: 12, color: AppColors.muted),
                   ),
                   value: _demo,
-                  onChanged: (v) => setState(() => _demo = v),
+                  onChanged: c.localDemoOnly
+                      ? null
+                      : (v) => setState(() => _demo = v),
                 ),
                 const SizedBox(height: 12),
                 Text(
@@ -185,6 +281,106 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
+          const SectionHeading('Voice & mobile alarm'),
+          Surface(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Enable Voice Commands'),
+                  value: _voice,
+                  onChanged: (v) => setState(() => _voice = v),
+                ),
+                const Text(
+                  'Push-to-talk only. Recognition may use the phone speech service and internet; offline language support varies.',
+                  style: TextStyle(fontSize: 12, color: AppColors.muted),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Enable Warning Sound'),
+                  value: _sound,
+                  onChanged: (v) {
+                    setState(() => _sound = v);
+                    if (!v) _stopTest();
+                  },
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Vibrate on warning'),
+                  subtitle: const Text('Where supported by phone settings'),
+                  value: _vibration,
+                  onChanged: (v) => setState(() => _vibration = v),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _sound ? _testAlarm : null,
+                  icon: const Icon(Icons.volume_up_outlined),
+                  label: Text(
+                    _testingAlarm ? 'Stop Test Alarm' : 'Test Alarm Sound',
+                  ),
+                ),
+                const Text(
+                  'Three-second test. Sound respects phone audio settings and is only available while the app is active.',
+                  style: TextStyle(fontSize: 12, color: AppColors.muted),
+                ),
+              ],
+            ),
+          ),
+          const SectionHeading('Energy budget & estimated wattage'),
+          Surface(
+            child: Column(
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: _period,
+                  decoration: const InputDecoration(labelText: 'Budget period'),
+                  items: ['daily', 'weekly', 'monthly']
+                      .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+                      .toList(),
+                  onChanged: (v) => setState(() {
+                    final current = double.tryParse(_budget.text);
+                    if (current != null && current.isFinite && current > 0) {
+                      _budgetLimits[_period] = current;
+                    }
+                    _period = v!;
+                    _budget.text = (_budgetLimits[_period] ?? 100).toString();
+                  }),
+                ),
+                const SizedBox(height: 18),
+                TextFormField(
+                  controller: _budget,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Estimated cost budget',
+                    prefixText: '₱ ',
+                  ),
+                  validator: _number,
+                ),
+                ..._wattages.entries.map(
+                  (entry) => Padding(
+                    padding: const EdgeInsets.only(top: 18),
+                    child: TextFormField(
+                      controller: entry.value,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: InputDecoration(
+                        labelText:
+                            '${SupportedDevices.names[entry.key]} estimated watts',
+                        suffixText: 'W',
+                      ),
+                      validator: _number,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'User-defined hypothetical appliance wattages, not energy consumed by the physical LED models. Fridge and AC do not refrigerate or cool. Changes apply to future observed intervals.',
+                  style: TextStyle(fontSize: 12, color: AppColors.muted),
+                ),
+              ],
+            ),
+          ),
           const SectionHeading('Energy & thresholds'),
           Surface(
             child: Column(
@@ -237,7 +433,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 style: TextStyle(fontSize: 14),
               ),
               subtitle: const Text(
-                'Smart Exit, high load, and unusual runtime. Alerts are checked while the app is open.',
+                'Energy budget, high load, and unusual runtime. Alerts are checked while the app is open.',
                 style: TextStyle(fontSize: 12, color: AppColors.muted),
               ),
               value: _alerts,

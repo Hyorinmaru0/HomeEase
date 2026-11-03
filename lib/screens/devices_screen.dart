@@ -61,14 +61,24 @@ class _DevicesScreenState extends State<DevicesScreen> {
             title: 'No devices here yet',
             message: 'Your devices will appear after connecting your ESP32.',
           ),
-        AdaptiveGrid(
-          minWidth: 340,
-          children: devices
-              .map(
-                (d) => DeviceCard(controller: c, device: d, listLayout: true),
-              )
-              .toList(),
-        ),
+        for (final room in c.rooms.where(
+          (r) => _room == null || r.id == _room,
+        )) ...[
+          SectionHeading(
+            room.name,
+            action:
+                '${devices.where((d) => d.roomId == room.id).length} appliances',
+          ),
+          AdaptiveGrid(
+            minWidth: 340,
+            children: devices
+                .where((d) => d.roomId == room.id)
+                .map(
+                  (d) => DeviceCard(controller: c, device: d, listLayout: true),
+                )
+                .toList(),
+          ),
+        ],
         const SizedBox(height: 22),
         const Row(
           crossAxisAlignment: CrossAxisAlignment.start,

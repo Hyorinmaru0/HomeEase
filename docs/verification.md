@@ -1,79 +1,56 @@
-# Verification guide
+# HomeEase verification ? local accounts
 
-## Firmware version consistency repair
+The current build replaces the former Supabase integration with local accounts. Older screenshots in this folder show earlier builds and are not evidence for the new authentication flow.
 
-A later inspection found the local sketch reporting `homeease-1.0` and missing its fan-disable guards even though the configuration still set `HOMEEASE_ENABLE_FAN_RELAY=0`. Restored the guards for startup, commands, routines and telemetry while preserving the Wi-Fi retry correction. The source now reports `homeease-1.1`, adds `fanRelayEnabled: false` to `/api/state` in presentation mode, and prints its version/fan configuration at startup. A read-only request to `http://10.17.244.67/api/state` timed out from the development computer; the installed board version remains unverified.
+## ESP32 command confirmation update - app 1.0.2
 
-## Wi-Fi retry correction
+The user reported physical LEDs changing despite a generic confirmation/Wi-Fi error. The app now accepts valid 2xx write acknowledgments with text or empty bodies, validates the following state JSON, retries one transient GET failure, and never replays a PUT automatically. Board-side command HTTP errors trigger a read-only refresh so the displayed state reflects actual telemetry while the explicit command failure remains visible. Network, timeout, permission, malformed-data and HTTP errors have distinct messages.
 
-The reported `wifi:sta is connecting, return error` appeared approximately every 15 seconds, matching the firmware's manual retry interval. Removed that timer-driven `WiFi.reconnect()` call so it does not overlap the ESP32 core's automatic reconnect attempts. Added event logs for association, IP acquisition/loss and numeric disconnect reasons without printing credentials. This corrects the overlapping retry; the underlying hotspot connection failure still requires fresh device logs and physical verification.
-
-Corrected sketch compiled successfully for ESP32 Dev Module: 1,006,625 bytes flash and 50,596 bytes static RAM. The existing LCD library architecture warning remains. No upload or physical connection test was performed for this correction.
-
-## October 15 presentation configuration
-
-- Existing app design/modules retained. Relay and motor are disconnected; `HOMEEASE_ENABLE_FAN_RELAY=0` is the firmware default.
-- GPIO32 is excluded from startup pin configuration, manual power requests, scheduled execution and active energy estimates. The REST device remains present and unavailable; direct power writes return 503. This is software verification, not a physical pin measurement.
-- `flutter analyze`: no issues. `flutter test`: **29 tests passed**, including unavailable fan switches on dashboard, Devices and details, controller rejection of fan writes, working connected controls, and preserved demo fan behavior.
-- `flutter build apk --debug --no-pub`: passed; the presentation APK is `build/app/outputs/flutter-apk/app-debug.apk`.
-- ESP32 Dev Module firmware compile passed with ESP32 core 3.3.12, ArduinoJson 7.4.2 and LiquidCrystal I2C 1.1.2. Flash: **1,006,245 bytes (76%)**; static RAM: **50,604 bytes (15%)**.
-- The existing LCD library still emits an AVR-architecture metadata warning; ESP32 compilation succeeds. LCD runtime/electrical checks remain pending.
-- No upload, GPIO32 measurement, physical Wi-Fi test or combined component test was performed. See the [presentation plan](progress-report-2026-10-15.md) for Android setup and acceptance checks.
-
-The records below describe earlier builds, before the presentation fan-disable update.
-
-## ESP32 integration update — 13 October 2026
-
-The existing application design/navigation/modules are preserved. Mini TV uses the existing appliance controls and is included in the dashboard. Live room monitoring adds ultrasonic distance, PIR motion and availability labels; demo data remains isolated. Rated-power estimates are explicitly labeled. See [hardware integration](hardware-integration.md) for the exact user-tested GPIO mapping, electrical checks, upload instructions and physical acceptance checklist.
-
-- ESP32 firmware compiled successfully for `esp32:esp32:esp32` using core 3.3.12, ArduinoJson 7.4.2 and LiquidCrystal I2C 1.1.2.
-- Final firmware footprint: 1,005,741 bytes flash (76%), 50,596 bytes static RAM (15%). The final build includes bounded NVS blob checkpoints. LCD library metadata emits an AVR compatibility warning; this did not prevent the ESP32 build.
-- Added tests cover old demo-save migration, Mini TV controls/routines/history, all four REST power paths, sensor cache/source separation, unavailable sensor alerts, failed command recovery, and live UI on a 320-pixel screen at 1.3× text scale.
-- Final `flutter analyze`: no issues. Final `flutter test`: all **27 tests passed**. The narrow-screen live test caught a long sensor-status overflow, resolved by wrapping the existing status badge.
-- `flutter build apk --debug --no-pub`: passed. Updated APK: `build/app/outputs/flutter-apk/app-debug.apk`.
-- No firmware upload, COM3 operation, physical Wi-Fi request, motor operation or electrical measurement was performed. User-reported individual tests are separate from these software checks. INA219, door sensor and buzzer remain pending.
-
-The following design-preview record is historical; the integration update above supersedes its earlier firmware-deferred status.
-
-## Design refresh verified on 12 October 2026
-
-- Flutter 3.47.5 / Dart 3.13.4.
+- Focused ESP32/controller/seven-appliance tests: 55 passed.
+- Full `flutter test`: 133 passed, including the production-strength local account test.
 - `flutter analyze`: no issues.
-- `flutter test`: all 19 tests passed, including 320/390/1000-pixel layouts and 1.3× system text.
-- Universal Android debug APK built with ARMv7, ARM64 and x86_64 support: `build/app/outputs/flutter-apk/app-debug.apk`.
-- Installed and launched successfully on the Pixel 7 emulator (Android 17).
-- Native dashboard, devices, energy, routines and settings layouts visually inspected on the Pixel 7 emulator. The final filter-contrast and row-alignment fixes were checked with hot reload; the debug APK was rebuilt afterward. Preview images are saved alongside this guide.
-- Physical ESP32 communication and iOS builds have not been tested; firmware is intentionally deferred.
+- `flutter build apk --debug`: passed. APK: `build/app/outputs/flutter-apk/HomeEase-1.0.2-connection-fix.apk`, 162,217,882 bytes, version 1.0.2 / build 3. Formatting: 54 Dart files, no changes.
+- Actual board response is unverified: the computer's read-only request to the supplied local address timed out. The phone's firmware/storage status is still needed to determine the exact board-side cause.
+- Firmware 2.2 upload remains pending. The authorized upload wrote no firmware: COM3 was initially held by Serial Monitor; after releasing it, esptool reported wrong boot mode. Manual BOOT/EN assistance is required before retrying. No appliance writes were sent during the network diagnosis.
 
-The first Android build required installing NDK 28.2.13676358 and Android SDK Platform 36. With the new Android CLI, the NDK package identifier is `ndk/28.2.13676358`; the legacy `sdkmanager.bat` wrapper failed to pass this package correctly on this machine.
+See [confirmation troubleshooting](esp32-confirmation-troubleshooting.md).
 
-[Dashboard preview](homeease-dashboard.png) · [Devices preview](homeease-devices.png) · [Energy preview](homeease-energy.png) · [Routines preview](homeease-routines.png) · [Settings preview](homeease-settings.png)
+## Active-low output correction - 1 November 2026
 
-The refresh uses neutral charcoal surfaces and soft sage accents, compact device rows, consistent headings and spacing, and a power-first dashboard. Existing demo behavior and the separate ESP32 communication layer are unchanged.
+User-observed reversed controls were corrected in firmware `homeease-2.2` for Living Room AC GPIO33 and Smart Wall Lamp GPIO23. Both now use LOW for logical ON and HIGH for logical OFF. Startup preloads the same correct OFF level before enabling each GPIO. Other LED output polarities are unchanged. Compile-time checks cover the polarity truth table and pin conflicts.
 
-Run from the project root:
+ESP32 Dev Module compilation passed: 1,008,785 bytes flash (76%) and 50,828 bytes static RAM (15%). The compiled header matches source and the binary version is 2.2. The existing LCD library architecture warning remains. No board upload or app rebuild was performed; physical ON/OFF and startup verification remain pending. See [wiring and upload instructions](wiring-update-2026-11-01.md).
 
-```sh
-flutter pub get
-flutter analyze
-flutter test
-flutter run
-```
+## GPIO update ? 1 November 2026
 
-## Demo walkthrough
+Firmware `homeease-2.1` configures Mini Fridge GPIO14, Living Room AC GPIO33, INA219 SDA16/SCL17 on `Wire1`, and keeps LCD SDA21/SCL22 on `Wire`. The independent pin audit and compile-time assertion pass for all 13 unique assigned pins; GPIO32 is excluded. ESP32 Dev Module compilation passed: 1,008,765 bytes flash (76%), 50,828 bytes static RAM (15%). The existing LCD library architecture warning remains. The compiled header matches the updated source after excluding Arduino's generated line directive. See [current wiring and upload steps](wiring-update-2026-11-01.md).
 
-1. Open Home. The Demo badge identifies simulated data; the overview shows current watts and active-device counts.
-2. Open Devices and toggle Bedroom Light on. Current watts and device counts update across the app.
-3. Open a device's arrow button to view runtime, session energy and set a load priority.
-4. Open Home → Rooms → View all. Mark a powered room vacant. A Smart Exit alert appears; opening Alerts allows marking it read.
-5. Turn a device off. Usage history records its ON/OFF times, duration, energy and estimated cost.
-6. Open Routines. Create a schedule for a minute shortly in the future; keep the app open through that minute. Confirm the device changes once. Edit, disable or delete the schedule.
-7. Open Settings. Set the high-load threshold below current total watts and save; a high-load alert appears. Restore it afterward.
-8. Change the rate and alert preferences, save, and restart. Settings, history and routines should remain.
-9. Disable demo mode with an unreachable address. Confirm the offline banner appears and no demo readings are presented as live readings. Turn demo mode back on to restore the demo home.
+This configures the INA219 bus only; readings/calibration are still pending and energy remains estimated. No board upload or mobile APK rebuild was performed.
 
-## Automated coverage
+## Automated scope
 
-Tests cover energy and cost calculations, overnight sessions, occupancy alert deduplication, load/runtime thresholds, scheduled execution, saved demo/live separation, storage failures, failed hardware commands, malformed telemetry, request encoding, HTTP errors, primary screens at phone and tablet widths, and 1.3× system text scaling.
+- Local signup, case-insensitive email login, duplicate-email rejection, incorrect passwords, saved-session restoration, account identity stability and logout persistence.
+- Password/recovery-code hashes use separate random salts. PBKDF2-HMAC-SHA256 output is checked against an independent known vector; production uses 600,000 iterations off the UI isolate. Plaintext passwords and recovery codes are not saved.
+- Recovery requires the saved code, never grants appliance access during reset, rotates the code after reset, and returns to login. Recovery authorization does not survive restart. Wrong attempts trigger a persisted 30-second cooldown.
+- Local write failures cannot manufacture a signup session. Corrupt credential storage is not silently replaced. Generic errors do not expose private exception details.
+- Widget routing covers signup ? save recovery code ? dashboard, logout removing protected routes, retained per-account data, guest isolation, narrow screens, larger text, mismatched passwords, and visible scrolled error feedback.
+- Local profile/preferences/activity restoration, bounded activity, mismatched-account rejection, and logout draining pending writes without accepting stale writes.
+- Existing ESP32 REST, seven-appliance controls, voice, safety, schedules, sensor displays, energy/budget calculations and responsive module tests remain in the suite.
 
-Actual ESP32 communication requires uploading the included firmware and performing the physical checks in the hardware guide. iOS packaging requires a Mac with Xcode. Release distribution requires your own app signing configuration.
+## Local-account app 1.0.1 check results
+
+- `flutter analyze`: passed, no issues.
+- `flutter test`: 123 tests passed across the full suite before adding the production-work-factor smoke test.
+- Focused production-settings test: passed (signup + logout + login, 9,589 ms on this host). The suite now contains 124 tests; the new test was run separately after the full suite.
+- `dart format --output=none --set-exit-if-changed lib test`: passed with no changes.
+- `flutter build apk --debug`: passed without any backend defines.
+- APK: `build/app/outputs/flutter-apk/HomeEase-1.0.1-local.apk` (same bytes as `app-debug.apk`), 162,217,462 bytes. Version name 1.0.1, version code 2.
+- Source/dependency audit: no Supabase imports, dependencies or cloud sync code remain in `lib`, `test`, `pubspec.yaml` or `pubspec.lock`. Obsolete local backend configuration, migrations and templates were removed; hosted resources were not modified.
+
+This authentication version has not been installed or tested on the user's physical phone.
+
+## Phone acceptance check
+
+Install the latest APK over the old debug build. Create a new local account, save its recovery code, and continue to the dashboard. Log out through Settings ? Profile & logout and log back in; reopen the app to check saved-session restoration. Reset the password using the saved code, save the replacement, and sign in with the new password. Old cloud accounts are not imported. Use another local account to check separate preferences/history.
+
+Automated tests use injected memory stores and hardware fakes. They do not establish Android secure storage on your physical phone, actual ESP32 output/sensor behavior, phone microphone/audio permissions, or iOS behavior. Firmware was not edited or flashed for this authentication change. The earlier firmware build remains documented in [the hardware guide](system-update-2026-10-31.md).

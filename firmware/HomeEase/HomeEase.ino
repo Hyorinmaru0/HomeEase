@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include <time.h>
 #include <memory>
+#include <driver/gpio.h>
 #include "HomeEaseConfig.h"
 
 struct Device {
@@ -21,18 +22,24 @@ struct Device {
 Device devices[] = {
   {"living-light", "Living Room Light", "living", "light", LIVING_LIGHT_PIN, false, LIVING_RATED_WATTS},
   {"bedroom-light", "Bedroom Light", "bedroom", "light", BEDROOM_LIGHT_PIN, false, BEDROOM_RATED_WATTS},
-  {"fan", "Fan", "bedroom", "fan", FAN_RELAY_PIN, FAN_RELAY_ACTIVE_LOW, FAN_RATED_WATTS},
-  {"mini-tv", "Mini TV (LCD 16\xc3\x97" "2)", "living", "tv", -1, false, TV_RATED_WATTS}
+  {"mini-tv", "Mini TV (LCD 16\xc3\x97" "2)", "living", "tv", -1, false, TV_RATED_WATTS},
+  {"mini-fridge", "Mini Fridge", "living", "fridge", MINI_FRIDGE_PIN, false, FRIDGE_RATED_WATTS},
+  {"living-ac", "Living Room AC", "living", "ac", LIVING_AC_PIN, LIVING_AC_ACTIVE_LOW, LIVING_AC_RATED_WATTS},
+  {"bedroom-wall-lamp", "Smart Wall Lamp", "bedroom", "wall-lamp", WALL_LAMP_PIN, WALL_LAMP_ACTIVE_LOW, WALL_LAMP_RATED_WATTS},
+  {"bedroom-ac", "Bedroom AC", "bedroom", "ac", BEDROOM_AC_PIN, false, BEDROOM_AC_RATED_WATTS}
 };
+constexpr size_t DEVICE_COUNT = sizeof(devices) / sizeof(devices[0]);
+constexpr int TV_DEVICE_INDEX = 2;
+static_assert(DEVICE_COUNT == 7, "Expected exactly seven appliances");
 WebServer server(80);
 Preferences prefs;
 LiquidCrystal_I2C lcd(LCD_ADDRESS, 16, 2);
 JsonDocument schedules, history;
 bool storageReady = false, storageHealthy = true, lcdOnline = false;
-bool pirReady = false, motion = false, pirSeen = false, bedroomOccupied = false;
+bool pirReady = false, motion = false, bedroomOccupied = false;
 bool distanceValid = false;
 float distanceCm = 0;
-uint32_t lastMotion = 0, lastSensor = 0, lastEnergy = 0, lastCheckpoint = 0;
+uint32_t lastSensor = 0, lastEnergy = 0, lastCheckpoint = 0;
 uint32_t lastLcdProbe = 0;
 String lastScheduleMinute;
 uint32_t bootId;
@@ -47,11 +54,11 @@ String isoTime(time_t stamp) {
   return String(out);
 }
 int deviceIndex(const String &id) {
-  for (int i = 0; i < 4; ++i) if (id == devices[i].id) return i;
+  for (size_t i = 0; i < DEVICE_COUNT; ++i) if (id == devices[i].id) return i;
   return -1;
 }
 bool deviceEnabled(int index) {
-  return index >= 0 && index < 4 && (index != 2 || FAN_RELAY_ENABLED);
+  return index >= 0 && index < (int)DEVICE_COUNT;
 }
 bool probeLcd() {
   Wire.beginTransmission(LCD_ADDRESS);
@@ -74,9 +81,9 @@ void integrateEnergy() {
   const double hours = (uint32_t)(stamp - lastEnergy) / 3600000.0;
   lastEnergy = stamp;
   for (Device &d : devices) {
-    if (!d.on || (d.pin == FAN_RELAY_PIN && !FAN_RELAY_ENABLED)) continue;
+    if (!d.on) continue;
     d.total += d.rated * hours / 1000.0;
-    // Never invent wall-clock timestamps before NTP has synchronized.
+
     if (!d.onSince && clockReady()) {
       d.onSince = time(nullptr);
       d.startKwh = d.total;
@@ -97,6 +104,7 @@ void recordSession(Device &d, time_t end) {
 bool checkpoint() {
   if (!storageReady) return storageHealthy = false;
   JsonDocument data;
+  data["schemaVersion"] = 2;
   data["schedules"] = schedules.as<JsonArray>();
   data["history"] = history.as<JsonArray>();
   data["lastScheduleMinute"] = lastScheduleMinute;
@@ -104,12 +112,12 @@ bool checkpoint() {
   JsonArray saved = data["devices"].to<JsonArray>();
   for (Device &d : devices) {
     JsonObject o = saved.add<JsonObject>();
+    o["id"] = d.id;
     o["total"] = d.total; o["startKwh"] = d.startKwh;
     o["onSince"] = d.onSince; o["priority"] = d.priority;
   }
   String payload;
-  // NVS strings are limited to 4000 bytes. Use a bounded blob and trim only
-  // the oldest history entries to leave room for atomic NVS replacement.
+
   while (measureJson(data) > MAX_CHECKPOINT_BYTES && history.size() > 0) {
     history.as<JsonArray>().remove(0);
     data["history"] = history.as<JsonArray>();
@@ -134,15 +142,34 @@ void restore() {
   if (deserializeJson(data, saved.get(), size)) { storageHealthy = false; return; }
   if (data["schedules"].is<JsonArray>()) schedules.set(data["schedules"]);
   if (data["history"].is<JsonArray>()) history.set(data["history"]);
+
+  for (JsonDocument *document : {&schedules, &history}) {
+    JsonArray list = document->as<JsonArray>();
+    for (int i = (int)list.size() - 1; i >= 0; --i) {
+      String id = list[i]["applianceId"].as<String>();
+      if (id == "living-fridge") id = "mini-fridge";
+      if (id == "bedroom-lamp") id = "bedroom-wall-lamp";
+      if (deviceIndex(id) < 0) list.remove(i);
+      else list[i]["applianceId"] = id;
+    }
+  }
   lastScheduleMinute = data["lastScheduleMinute"].as<String>();
-  for (int i = 0; i < 4; ++i) {
+  for (size_t i = 0; i < DEVICE_COUNT; ++i) {
     Device &d = devices[i];
-    JsonObject o = data["devices"][i];
+    JsonObject o;
+    if ((data["schemaVersion"] | 1) >= 2) {
+      for (JsonObject candidate : data["devices"].as<JsonArray>())
+        if (candidate["id"] == d.id) { o = candidate; break; }
+    } else {
+
+      const int legacy = i < 2 ? (int)i : i == TV_DEVICE_INDEX ? 3 : -1;
+      if (legacy >= 0) o = data["devices"][legacy];
+    }
     d.total = o["total"] | 0.0;
     d.startKwh = o["startKwh"] | d.total;
     d.onSince = o["onSince"] | (time_t)0;
     d.priority = o["priority"] | "medium";
-    // Boot always starts OFF; only account through the last durable checkpoint.
+
     recordSession(d, data["checkpointTime"] | (time_t)0);
     d.onSince = 0; d.startKwh = d.total;
   }
@@ -150,15 +177,15 @@ void restore() {
 }
 bool setPower(int index, bool on) {
   if (!deviceEnabled(index)) return false;
-  if (index == 3) {
+  if (index == TV_DEVICE_INDEX) {
     lcdOnline = probeLcd();
     if (!lcdOnline) return false;
   }
   integrateEnergy();
   Device &d = devices[index];
-  if (index == 3) drawTv(on);
-  else digitalWrite(d.pin, on != d.activeLow ? HIGH : LOW);
-  if (on == d.on) return storageHealthy || checkpoint(); // Retry storage, not the session.
+  if (index == TV_DEVICE_INDEX) drawTv(on);
+  else digitalWrite(d.pin, outputLevelForPower(on, d.activeLow));
+  if (on == d.on) return storageHealthy || checkpoint();
   if (on) {
     d.onSince = clockReady() ? time(nullptr) : 0;
     d.startKwh = d.total;
@@ -173,9 +200,7 @@ void sampleSensors() {
   const uint32_t stamp = millis();
   pirReady = pirReady || stamp >= PIR_WARMUP_MS;
   motion = pirReady && digitalRead(PIR_PIN) == HIGH;
-  if (motion) { lastMotion = stamp; pirSeen = true; }
-  bedroomOccupied = pirReady && pirSeen &&
-      (motion || (uint32_t)(stamp - lastMotion) < PIR_VACANCY_DELAY_MS);
+  bedroomOccupied = motion;
   if ((uint32_t)(stamp - lastSensor) < SENSOR_INTERVAL_MS) return;
   lastSensor = stamp;
   digitalWrite(ULTRASONIC_TRIG_PIN, LOW); delayMicroseconds(2);
@@ -215,22 +240,20 @@ void sendState() {
   state["energySource"] = "estimated";
   state["clockSynced"] = clockReady();
   state["storageHealthy"] = storageHealthy;
-  state["firmware"] = "homeease-1.1";
-  state["fanRelayEnabled"] = FAN_RELAY_ENABLED;
-  state["pendingHardware"] = FAN_RELAY_ENABLED
-      ? "DC fan motor, INA219, door sensor, buzzer, LCD electrical compatibility"
-      : "Relay and DC fan not connected (disabled for presentation); INA219, door sensor, buzzer; LCD electrical verification";
+  state["firmware"] = FIRMWARE_VERSION;
+  state["fanRelayEnabled"] = false;
+  state["stateSource"] = "commanded";
+  state["energyNote"] = "Hypothetical appliance wattages, not LED-model electricity readings";
   JsonArray list = state["devices"].to<JsonArray>();
-  for (int i = 0; i < 4; ++i) {
+  for (size_t i = 0; i < DEVICE_COUNT; ++i) {
     Device &d = devices[i];
     JsonObject o = list.add<JsonObject>();
     o["id"] = d.id; o["name"] = d.name; o["roomId"] = d.room; o["kind"] = d.kind;
     o["ratedWatts"] = d.rated; o["isOn"] = deviceEnabled(i) && d.on;
-    o["online"] = deviceEnabled(i) && (i != 3 || lcdOnline);
-    if (i == 2) o["hardwareNote"] = FAN_RELAY_ENABLED
-        ? "Relay control; fan motor verification pending"
-        : "Not connected; relay and fan disabled for presentation";
-    if (i == 3) o["hardwareNote"] = "LCD electrical verification pending";
+    o["online"] = i != TV_DEVICE_INDEX || lcdOnline;
+    if (d.pin >= 0) o["gpio"] = d.pin;
+    if (i == 3) o["hardwareNote"] = "LED power indicator only; manual door, no door sensor; no refrigeration";
+    if (i == 4 || i == 6) o["hardwareNote"] = "LED model only; no real cooling";
     o["watts"] = deviceEnabled(i) && d.on ? d.rated : 0;
     o["totalKwh"] = d.total; o["sessionStartKwh"] = d.startKwh;
     o["priority"] = d.priority;
@@ -239,7 +262,7 @@ void sendState() {
   JsonArray rooms = state["rooms"].to<JsonArray>();
   JsonObject living = rooms.add<JsonObject>();
   living["id"] = "living"; living["name"] = "Living room";
-  living["occupied"] = distanceValid && distanceCm < OCCUPIED_DISTANCE_CM;
+  living["occupied"] = distanceValid && distanceCm <= OCCUPIED_DISTANCE_CM;
   living["sensor"] = "HC-SR04"; living["sensorOnline"] = distanceValid;
   if (distanceValid) living["distanceCm"] = distanceCm; else living["distanceCm"] = nullptr;
   JsonObject bedroom = rooms.add<JsonObject>();
@@ -287,12 +310,15 @@ void routeRequest() {
     if (!checkpoint()) { schedules.set(previous); history.set(previousHistory); reply(503); return; }
     reply(200); return;
   }
-  for (int i = 0; i < 4; ++i) {
+  if (server.uri() == "/api/devices/fan/power") {
+    reply(503, "{\"error\":\"Fan retired; GPIO32 untouched\"}"); return;
+  }
+  for (size_t i = 0; i < DEVICE_COUNT; ++i) {
     const String prefix = String("/api/devices/") + devices[i].id;
     if (server.uri() == prefix + "/power") {
       if (!request["isOn"].is<bool>()) { reply(400); return; }
       if (!deviceEnabled(i)) {
-        reply(503, "{\"error\":\"Fan relay disabled; hardware not connected\"}"); return;
+        reply(503, "{\"error\":\"Device unavailable\"}"); return;
       }
       reply(setPower(i, request["isOn"].as<bool>()) ? 200 : 503); return;
     }
@@ -311,9 +337,11 @@ void setup() {
   Serial.begin(115200);
   bootId = esp_random();
   for (Device &d : devices) {
-    if (d.pin < 0 || (d.pin == FAN_RELAY_PIN && !FAN_RELAY_ENABLED)) continue;
-    digitalWrite(d.pin, d.activeLow ? HIGH : LOW); // Establish OFF before output mode.
+    if (d.pin < 0) continue;
+    const uint8_t offLevel = outputLevelForPower(false, d.activeLow);
+    gpio_set_level((gpio_num_t)d.pin, offLevel);
     pinMode(d.pin, OUTPUT);
+    digitalWrite(d.pin, offLevel);
   }
   pinMode(ULTRASONIC_TRIG_PIN, OUTPUT); digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
   pinMode(ULTRASONIC_ECHO_PIN, INPUT);
@@ -322,10 +350,17 @@ void setup() {
   Wire.setTimeOut(50);
   lcdOnline = probeLcd();
   if (lcdOnline) { lcd.init(); drawTv(false); }
+
+  if (Wire1.begin(INA219_SDA_PIN, INA219_SCL_PIN, INA219_I2C_HZ)) {
+    Wire1.setTimeOut(50);
+    Serial.printf("INA219 I2C bus configured: SDA=%u, SCL=%u; measurements pending.\n",
+                  INA219_SDA_PIN, INA219_SCL_PIN);
+  } else {
+    Serial.println("INA219 I2C bus initialization failed; measurements unavailable.");
+  }
   restore();
   lastEnergy = millis();
-  // The core owns reconnection. Calling reconnect() on a timer can collide
-  // with an association already in progress ("sta is connecting").
+
   WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
     switch (event) {
       case ARDUINO_EVENT_WIFI_STA_CONNECTED:
@@ -351,8 +386,7 @@ void setup() {
   server.onNotFound(routeRequest);
   server.begin();
   Serial.println("HomeEase: outputs OFF. Waiting for Wi-Fi; sensors continue locally.");
-  Serial.printf("Firmware: homeease-1.1; fan relay %s\n",
-                FAN_RELAY_ENABLED ? "ENABLED" : "DISABLED (GPIO32 untouched)");
+  Serial.printf("Firmware: %s; seven appliances; GPIO32 untouched\n", FIRMWARE_VERSION);
 }
 void loop() {
   static bool wasConnected = false;
@@ -368,7 +402,7 @@ void loop() {
   if ((uint32_t)(millis() - lastLcdProbe) >= 2000) {
     lastLcdProbe = millis();
     const bool present = probeLcd();
-    if (present && !lcdOnline) { lcd.init(); drawTv(devices[3].on); }
+    if (present && !lcdOnline) { lcd.init(); drawTv(devices[TV_DEVICE_INDEX].on); }
     lcdOnline = present;
   }
   if ((uint32_t)(millis() - lastCheckpoint) >= 60000) checkpoint();

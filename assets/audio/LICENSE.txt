@@ -1,0 +1,5 @@
+HomeEase safety_alarm.wav
+Original synthesized two-tone warning generated for this project, 2026-10-22.
+No third-party recording or online sound source is used.
+This sound is dedicated to the public domain under CC0 1.0.
+22050 Hz, mono, 16-bit PCM; two seconds with attack/release envelopes.
